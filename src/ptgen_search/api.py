@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
@@ -30,6 +30,11 @@ def read_state() -> dict:
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {"status": "invalid_state_file"}
+
+
+def is_missing_index_error(exc: MeiliError) -> bool:
+    text = str(exc)
+    return "index_not_found" in text or f"Index `{settings.index_name}` not found" in text
 
 
 def build_filter(source: str | None, kind: str | None, year: int | None) -> list[str]:
@@ -89,6 +94,16 @@ def search(
     try:
         return client.search(settings.index_name, payload)
     except MeiliError as exc:
+        if is_missing_index_error(exc):
+            return {
+                "hits": [],
+                "estimatedTotalHits": 0,
+                "limit": limit,
+                "offset": offset,
+                "processingTimeMs": 0,
+                "query": q,
+                "message": "index is still building",
+            }
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -107,6 +122,11 @@ if WEB_DIR.exists():
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.head("/")
+def index_head() -> Response:
+    return Response()
 
 
 @app.get("/{path:path}")

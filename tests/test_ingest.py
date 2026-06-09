@@ -4,7 +4,8 @@ import unittest
 
 from fastapi import HTTPException
 
-from ptgen_search.api import build_filter
+from ptgen_search.api import build_filter, is_missing_index_error
+from ptgen_search.meili_client import MeiliError
 from ptgen_search.ingest import merge_docs, normalize_work
 
 
@@ -148,6 +149,9 @@ class NormalizeWorkTests(unittest.TestCase):
             build_filter('nosuch" OR sources = "douban', None, None)
 
         self.assertEqual(build_filter("douban", "work", 2011), ['sources = "douban"', 'kind = "work"', "year = 2011"])
+
+    def test_missing_index_error_is_detected(self) -> None:
+        self.assertTrue(is_missing_index_error(MeiliError('GET failed: {"code":"index_not_found"}')))
 
 
 if __name__ == "__main__":
