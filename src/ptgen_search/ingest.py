@@ -52,6 +52,19 @@ def run_git(args: list[str], cwd: Path | None = None) -> str:
     return completed.stdout.strip()
 
 
+def ensure_git_safe_directory(path: Path) -> None:
+    completed = subprocess.run(
+        ["git", "config", "--global", "--get-all", "safe.directory"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    safe_paths = set(completed.stdout.splitlines())
+    if str(path) not in safe_paths:
+        run_git(["config", "--global", "--add", "safe.directory", str(path)])
+
+
 def clean_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -441,6 +454,8 @@ def upsert_staged(conn: sqlite3.Connection, doc: dict[str, Any]) -> None:
 
 def prepare_source(settings: Settings) -> str | None:
     path = settings.ptgen_path
+    if (path / ".git").exists():
+        ensure_git_safe_directory(path)
     if settings.skip_git_update:
         return current_commit(path)
     if not (path / ".git").exists():
