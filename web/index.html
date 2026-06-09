@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PtGen Search</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260609" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="search-panel">
+        <div class="brand-row">
+          <div>
+            <p class="eyebrow">PtGen</p>
+            <h1>Work Search</h1>
+          </div>
+          <div id="status" class="status">Index status</div>
+        </div>
+
+        <form id="search-form" class="search-form">
+          <input
+            id="query"
+            type="search"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Title, alias, director, cast, staff, source ID"
+            autofocus
+          />
+          <button type="submit">Search</button>
+        </form>
+
+        <div class="filters">
+          <select id="source">
+            <option value="">All sources</option>
+            <option value="douban">Douban</option>
+            <option value="imdb">IMDb</option>
+            <option value="bangumi">Bangumi</option>
+            <option value="steam">Steam</option>
+            <option value="epic">Epic</option>
+            <option value="indienova">Indienova</option>
+          </select>
+          <select id="kind">
+            <option value="">All kinds</option>
+            <option value="movie">Movie</option>
+            <option value="tv">TV series</option>
+            <option value="anime">Anime</option>
+            <option value="game">Game</option>
+            <option value="work">Work</option>
+          </select>
+          <input id="year" type="number" min="1800" max="2200" placeholder="Year" />
+        </div>
+      </section>
+
+      <section class="results-wrap">
+        <div class="result-meta">
+          <span id="summary">Ready</span>
+          <button id="clear" type="button">Clear</button>
+        </div>
+        <div id="results" class="results"></div>
+      </section>
+    </main>
+
+    <template id="result-template">
+      <article class="result">
+        <div class="poster-slot"></div>
+        <div class="result-body">
+          <div class="result-topline">
+            <h2></h2>
+            <span class="year"></span>
+          </div>
+          <div class="aliases"></div>
+          <div class="badges"></div>
+          <p class="people"></p>
+          <p class="description"></p>
+          <div class="source-line"></div>
+        </div>
+      </article>
+    </template>
+
+    <script src="/assets/app.js?v=20260609" type="module"></script>
+  </body>
+</html>

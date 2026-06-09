@@ -1,0 +1,68 @@
+{
+  "displayedAttributes": [
+    "id",
+    "kind",
+    "sources",
+    "source_ids",
+    "titles",
+    "aliases",
+    "year",
+    "release_date",
+    "genres",
+    "tags",
+    "regions",
+    "languages",
+    "people",
+    "directors",
+    "writers",
+    "cast",
+    "staff",
+    "developers",
+    "publishers",
+    "description",
+    "poster",
+    "rating_score",
+    "rating_votes",
+    "updated_at",
+    "source_paths"
+  ],
+  "searchableAttributes": [
+    "titles",
+    "aliases",
+    "source_ids",
+    "directors",
+    "writers",
+    "cast",
+    "staff",
+    "developers",
+    "publishers",
+    "people",
+    "genres",
+    "tags",
+    "description"
+  ],
+  "filterableAttributes": [
+    "sources",
+    "kind",
+    "year",
+    "genres",
+    "tags",
+    "regions",
+    "languages"
+  ],
+  "sortableAttributes": [
+    "year",
+    "rating_score",
+    "rating_votes",
+    "updated_at"
+  ],
+  "rankingRules": [
+    "words",
+    "typo",
+    "proximity",
+    "attribute",
+    "sort",
+    "exactness"
+  ]
+}
+

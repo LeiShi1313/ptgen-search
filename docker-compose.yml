@@ -1,0 +1,51 @@
+services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.46.1
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-ptgen-local-master-key}
+      MEILI_ENV: development
+    ports:
+      - "127.0.0.1:7700:7700"
+    volumes:
+      - ./data/meili:/meili_data
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: uvicorn ptgen_search.api:app --host 0.0.0.0 --port 8080
+    environment:
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-ptgen-local-master-key}
+      MEILI_INDEX: ${MEILI_INDEX:-works}
+      STATE_DIR: /data/state
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    volumes:
+      - ./data/state:/data/state
+    depends_on:
+      - meilisearch
+    restart: unless-stopped
+
+  ingester:
+    build: .
+    command: python -m ptgen_search.ingest schedule
+    environment:
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-ptgen-local-master-key}
+      MEILI_INDEX: ${MEILI_INDEX:-works}
+      PTGEN_REPO_URL: ${PTGEN_REPO_URL:-https://github.com/ourbits/PtGen.git}
+      PTGEN_PATH: /data/ptgen
+      STATE_DIR: /data/state
+      PTGEN_BRANCH: ${PTGEN_BRANCH:-main}
+      PTGEN_SKIP_GIT_UPDATE: ${PTGEN_SKIP_GIT_UPDATE:-0}
+      PTGEN_MAX_FILES_PER_SOURCE: ${PTGEN_MAX_FILES_PER_SOURCE:-0}
+      PTGEN_INCLUDE_FILES: ${PTGEN_INCLUDE_FILES:-}
+      INGEST_RUN_ON_START: ${INGEST_RUN_ON_START:-1}
+      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-86400}
+      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-2500}
+    volumes:
+      - ./data/ptgen:/data/ptgen
+      - ./data/state:/data/state
+    depends_on:
+      - meilisearch
+    restart: unless-stopped
