@@ -18,8 +18,9 @@ This can also be used as a media library search API. The API is intentionally sm
 clients search works, inspect ingest/index status, and optionally fetch a work by
 its source-qualified document id.
 
-Poster URLs in API responses are same-origin cache URLs when the original poster
-host is supported. The original source URL is kept in `poster_original`.
+`poster` stays as the original source URL. When the original poster host is
+supported, API responses also include `poster_ptgen`, a same-origin cached poster
+URL served by this backend.
 
 ## Services
 
@@ -172,8 +173,8 @@ Response shape:
       "developers": [],
       "publishers": [],
       "description": "Work summary text",
-      "poster": "https://ptgen.leishi.xyz/api/posters/...",
-      "poster_original": "https://img1.doubanio.com/view/photo/l_ratio_poster/public/p451926968.jpg",
+      "poster": "https://img1.doubanio.com/view/photo/l_ratio_poster/public/p451926968.jpg",
+      "poster_ptgen": "https://ptgen.leishi.xyz/api/posters/...",
       "rating_score": 6.5,
       "rating_votes": 1234,
       "updated_at": "2025-06-29T15:36:16",

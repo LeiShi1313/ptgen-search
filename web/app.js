@@ -54,13 +54,63 @@ function highlightedList(value, limit = 4) {
   return shown.join(", ");
 }
 
+function numeric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+const sourceLabels = {
+  douban: "Douban",
+  imdb: "IMDb",
+  bangumi: "Bangumi",
+  steam: "Steam",
+  epic: "Epic",
+  indienova: "Indienova",
+};
+
+function sourceUrl(source, sourceId) {
+  const value = text(sourceId).trim();
+  if (!value) return "";
+  const encoded = encodeURIComponent(value);
+  if (source === "douban") return `https://movie.douban.com/subject/${encoded}/`;
+  if (source === "imdb") return `https://www.imdb.com/title/${encoded}/`;
+  if (source === "bangumi") return `https://bgm.tv/subject/${encoded}`;
+  if (source === "steam") return `https://store.steampowered.com/app/${encoded}/`;
+  if (source === "epic") return `https://store.epicgames.com/en-US/p/${encoded}`;
+  if (source === "indienova") return `https://indienova.com/game/${encoded}`;
+  return "";
+}
+
+function renderSourceLinks(node, hit) {
+  node.replaceChildren();
+  const entries = Object.entries(hit.source_ids || {}).filter(([, value]) => text(value).trim());
+  if (!entries.length) {
+    node.textContent = hit.id;
+    return;
+  }
+
+  for (const [source, sourceId] of entries) {
+    const label = sourceLabels[source] || source;
+    const textValue = `${label} ${sourceId}`;
+    const url = sourceUrl(source, sourceId);
+    const item = url ? document.createElement("a") : document.createElement("span");
+    item.textContent = textValue;
+    if (url) {
+      item.href = url;
+      item.target = "_blank";
+      item.rel = "noreferrer";
+    }
+    node.append(item);
+  }
+}
+
 function renderHit(hit) {
   const item = template.content.firstElementChild.cloneNode(true);
   const title = item.querySelector("h2");
   const poster = item.querySelector(".poster-slot");
   const yearNode = item.querySelector(".year");
+  const scoreNode = item.querySelector(".score");
   const aliases = item.querySelector(".aliases");
-  const badges = item.querySelector(".badges");
   const people = item.querySelector(".people");
   const description = item.querySelector(".description");
   const sourceLine = item.querySelector(".source-line");
@@ -68,34 +118,31 @@ function renderHit(hit) {
 
   setHtml(title, highlightHtml(list(formatted.titles)[0] || firstTitle(hit)));
   yearNode.textContent = hit.year ? String(hit.year) : "";
+  const score = numeric(hit.rating_score);
+  if (score !== null) {
+    scoreNode.textContent = score.toFixed(1);
+    const votes = numeric(hit.rating_votes);
+    if (votes !== null) scoreNode.title = `${votes.toLocaleString()} votes`;
+  }
 
-  if (hit.poster) {
+  const posterUrl = hit.poster_ptgen || hit.poster;
+  if (posterUrl) {
     const img = document.createElement("img");
     img.loading = "lazy";
     img.alt = "";
     img.addEventListener("error", () => img.remove(), { once: true });
-    img.src = hit.poster;
+    img.src = posterUrl;
     poster.append(img);
   }
 
   const aliasText = highlightedList(formatted.aliases || hit.aliases, 5);
   aliases.innerHTML = aliasText ? `Aliases: ${aliasText}` : "";
 
-  for (const value of [...list(hit.sources), hit.kind].filter(Boolean).slice(0, 8)) {
-    const badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = value;
-    badges.append(badge);
-  }
-
   const peopleText = highlightedList(formatted.people || hit.people, 6);
   people.innerHTML = peopleText ? `People: ${peopleText}` : "";
   description.textContent = text(hit.description);
 
-  const ids = Object.entries(hit.source_ids || {})
-    .map(([key, value]) => `${key}:${value}`)
-    .join("  ");
-  sourceLine.textContent = ids || hit.id;
+  renderSourceLinks(sourceLine, hit);
   return item;
 }
 

@@ -225,13 +225,16 @@ class NormalizeWorkTests(unittest.TestCase):
             doc = {
                 "id": "douban-1",
                 "poster": "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp",
+                "_formatted": {"poster": "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp"},
             }
 
             proxied = cache.proxy_document(doc, "https://ptgen.test")
 
             self.assertEqual(doc["poster"], "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp")
-            self.assertEqual(proxied["poster_original"], doc["poster"])
-            self.assertTrue(proxied["poster"].startswith("https://ptgen.test/api/posters/"))
+            self.assertEqual(proxied["poster"], doc["poster"])
+            self.assertTrue(proxied["poster_ptgen"].startswith("https://ptgen.test/api/posters/"))
+            self.assertNotIn("poster_original", proxied)
+            self.assertTrue(proxied["_formatted"]["poster_ptgen"].startswith("https://ptgen.test/api/posters/"))
 
     def test_poster_cache_does_not_proxy_disallowed_hosts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

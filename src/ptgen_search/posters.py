@@ -129,11 +129,10 @@ class PosterCache:
         if not proxy_url:
             return doc
         copied = dict(doc)
-        copied["poster_original"] = poster
-        copied["poster"] = proxy_url
+        copied["poster_ptgen"] = proxy_url
         formatted = copied.get("_formatted")
         if isinstance(formatted, dict) and isinstance(formatted.get("poster"), str):
-            copied["_formatted"] = {**formatted, "poster": proxy_url, "poster_original": poster}
+            copied["_formatted"] = {**formatted, "poster_ptgen": proxy_url}
         return copied
 
     def proxy_search_result(self, result: dict[str, Any], public_base_url: str = "") -> dict[str, Any]:
