@@ -18,10 +18,13 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-ptgen-local-master-key}
       MEILI_INDEX: ${MEILI_INDEX:-works}
       STATE_DIR: /data/state
+      POSTER_CACHE_DIR: /data/posters
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     volumes:
       - ./data/state:/data/state
+      - ./data/posters:/data/posters
     depends_on:
       - meilisearch
     restart: unless-stopped

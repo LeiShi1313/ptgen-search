@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -12,6 +14,7 @@ from ptgen_search.api import build_filter, is_missing_index_error, lookup_docume
 from ptgen_search.ids import source_document_id
 from ptgen_search.ingest import normalize_work, upsert_staged
 from ptgen_search.meili_client import MeiliError
+from ptgen_search.posters import PosterCache
 
 
 class NormalizeWorkTests(unittest.TestCase):
@@ -215,6 +218,62 @@ class NormalizeWorkTests(unittest.TestCase):
         client.document("works", "source/id with space")
 
         self.assertEqual(paths, [("GET", "/indexes/works/documents/source%2Fid%20with%20space")])
+
+    def test_poster_cache_rewrites_allowed_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PosterCache(Path(tmp), max_bytes=1000, timeout_seconds=1, failure_ttl_seconds=60)
+            doc = {
+                "id": "douban-1",
+                "poster": "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp",
+            }
+
+            proxied = cache.proxy_document(doc, "https://ptgen.test")
+
+            self.assertEqual(doc["poster"], "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp")
+            self.assertEqual(proxied["poster_original"], doc["poster"])
+            self.assertTrue(proxied["poster"].startswith("https://ptgen.test/api/posters/"))
+
+    def test_poster_cache_does_not_proxy_disallowed_hosts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PosterCache(Path(tmp), max_bytes=1000, timeout_seconds=1, failure_ttl_seconds=60)
+            doc = {"id": "other-1", "poster": "https://example.test/poster.jpg"}
+
+            self.assertIs(cache.register_url(doc["poster"]), None)
+            self.assertEqual(cache.proxy_document(doc), doc)
+
+    def test_poster_route_serves_cached_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PosterCache(Path(tmp), max_bytes=1000, timeout_seconds=1, failure_ttl_seconds=60)
+            url = "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.webp"
+            key = cache.register_url(url)
+            assert key is not None
+            file_name = f"{key}.webp"
+            path = cache.files_dir / file_name
+            path.write_bytes(b"RIFFxxxxWEBP")
+            with cache.db() as conn:
+                conn.execute(
+                    """
+                    update posters
+                    set status = 'cached',
+                        content_type = 'image/webp',
+                        file_name = ?,
+                        size = 12,
+                        fetched_at = 1
+                    where key = ?
+                    """,
+                    (file_name, key),
+                )
+
+            previous = api_module.poster_cache
+            api_module.poster_cache = cache
+            try:
+                response = TestClient(api_module.app).get(f"/api/posters/{key}")
+            finally:
+                api_module.poster_cache = previous
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["content-type"], "image/webp")
+            self.assertEqual(response.content, b"RIFFxxxxWEBP")
 
     def test_missing_index_error_is_detected(self) -> None:
         self.assertTrue(is_missing_index_error(MeiliError('GET failed: {"code":"index_not_found"}')))

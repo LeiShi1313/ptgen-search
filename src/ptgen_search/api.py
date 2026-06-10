@@ -11,9 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .ids import source_document_id
 from .meili_client import MeiliClient, MeiliError
+from .posters import PosterCache, PosterNotFound
 
 settings = get_settings()
 client = MeiliClient(settings.meili_url, settings.meili_key)
+poster_cache = PosterCache(
+    settings.poster_cache_dir,
+    settings.poster_max_bytes,
+    settings.poster_fetch_timeout_seconds,
+    settings.poster_failure_ttl_seconds,
+)
 app = FastAPI(title="PTGen search")
 
 ALLOWED_SOURCES = {"douban", "imdb", "bangumi", "steam", "epic", "indienova"}
@@ -62,6 +69,14 @@ def lookup_document_id(source: str, source_id: str) -> str:
     return source_document_id(source, source_id)
 
 
+def proxy_document_posters(doc: dict) -> dict:
+    return poster_cache.proxy_document(doc, settings.public_base_url)
+
+
+def proxy_search_posters(result: dict) -> dict:
+    return poster_cache.proxy_search_result(result, settings.public_base_url)
+
+
 @app.get("/api/health")
 def health() -> dict:
     try:
@@ -102,7 +117,7 @@ def search(
     if filters:
         payload["filter"] = filters
     try:
-        return client.search(settings.index_name, payload)
+        return proxy_search_posters(client.search(settings.index_name, payload))
     except MeiliError as exc:
         if is_missing_index_error(exc):
             return {
@@ -120,7 +135,7 @@ def search(
 @app.get("/api/lookup")
 def lookup(source: str, id: Annotated[str, Query(min_length=1)]) -> dict:
     try:
-        return client.document(settings.index_name, lookup_document_id(source, id))
+        return proxy_document_posters(client.document(settings.index_name, lookup_document_id(source, id)))
     except MeiliError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -128,9 +143,22 @@ def lookup(source: str, id: Annotated[str, Query(min_length=1)]) -> dict:
 @app.get("/api/works/{document_id:path}")
 def work(document_id: str) -> dict:
     try:
-        return client.document(settings.index_name, document_id)
+        return proxy_document_posters(client.document(settings.index_name, document_id))
     except MeiliError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/posters/{key}")
+def poster(key: str) -> FileResponse:
+    try:
+        path, content_type = poster_cache.get_or_fetch(key)
+    except PosterNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 if WEB_DIR.exists():

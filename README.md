@@ -18,6 +18,9 @@ This can also be used as a media library search API. The API is intentionally sm
 clients search works, inspect ingest/index status, and optionally fetch a work by
 its source-qualified document id.
 
+Poster URLs in API responses are same-origin cache URLs when the original poster
+host is supported. The original source URL is kept in `poster_original`.
+
 ## Services
 
 - `meilisearch`: local persistent search backend
@@ -169,7 +172,8 @@ Response shape:
       "developers": [],
       "publishers": [],
       "description": "Work summary text",
-      "poster": "https://example.test/poster.jpg",
+      "poster": "https://ptgen.leishi.xyz/api/posters/...",
+      "poster_original": "https://img1.doubanio.com/view/photo/l_ratio_poster/public/p451926968.jpg",
       "rating_score": 6.5,
       "rating_votes": 1234,
       "updated_at": "2025-06-29T15:36:16",
@@ -263,6 +267,24 @@ curl http://127.0.0.1:8080/api/works/douban-10000794
 ```
 
 The response is the same work document shape returned inside `hits`.
+
+### `GET /api/posters/{key}`
+
+Serve a cached poster image. Search and lookup responses generate these URLs
+automatically; clients should not construct poster keys themselves.
+
+The cache is lazy:
+
+1. API responses register supported original poster URLs.
+2. The first request to `/api/posters/{key}` fetches the original image with
+   browser-like headers.
+3. The backend stores the image under `./data/posters`.
+4. Later requests serve the local file directly.
+
+Supported proxy hosts are intentionally whitelisted so the endpoint cannot become
+an open proxy. Failed poster fetches are cached briefly to avoid repeated retries.
+This does not require a reindex because poster URLs are rewritten at API response
+time.
 
 ### `GET /api/lookup`
 
