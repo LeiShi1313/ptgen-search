@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -43,7 +44,8 @@ class MeiliClient:
         return self.request("POST", f"/indexes/{index_name}/search", json=payload)
 
     def document(self, index_name: str, document_id: str) -> dict[str, Any]:
-        return self.request("GET", f"/indexes/{index_name}/documents/{document_id}")
+        encoded_id = quote(document_id, safe="")
+        return self.request("GET", f"/indexes/{index_name}/documents/{encoded_id}")
 
     def create_index(self, index_name: str, primary_key: str = "id") -> int:
         task = self.request("POST", "/indexes", json={"uid": index_name, "primaryKey": primary_key})

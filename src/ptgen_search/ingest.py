@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .config import Settings, get_settings
+from .ids import normalize_imdb_id, source_document_id
 from .meili_client import MeiliClient
 
 WORK_SOURCES = ("douban", "imdb", "bangumi", "steam", "epic", "indienova")
+INDEX_SCHEMA_VERSION = "source-specific-v2"
 GAME_SOURCES = {"steam", "epic", "indienova"}
 SOURCE_KINDS = {"Movie": "movie", "TVSeries": "tv", "TVEpisode": "tv", "VideoGame": "game"}
 ANIME_PLATFORMS = {"TV", "OVA", "OAD", "WEB", "剧场版", "Movie"}
@@ -271,20 +273,14 @@ def load_title_maps(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         imdbid = clean_text(row.get("imdbid"))
         if not dbid or not imdbid:
             continue
+        imdbid = normalize_imdb_id(imdbid)
         douban_to_imdb[dbid] = imdbid
         imdb_to_douban[imdbid] = dbid
     return douban_to_imdb, imdb_to_douban
 
 
-def document_id(site: str, sid: str, data: dict[str, Any], douban_to_imdb: dict[str, str]) -> str:
-    if site == "douban":
-        imdb_id = clean_text(data.get("imdb_id")) or douban_to_imdb.get(sid)
-        if imdb_id:
-            return f"work_imdb_{imdb_id}"
-    if site == "imdb":
-        imdb_id = sid if sid.startswith("tt") else f"tt{sid}"
-        return f"work_imdb_{imdb_id}"
-    return f"work_{site}_{sid}"
+def document_id(site: str, sid: str) -> str:
+    return source_document_id(site, sid)
 
 
 def normalize_work(
@@ -295,7 +291,7 @@ def normalize_work(
     douban_to_imdb: dict[str, str],
     imdb_to_douban: dict[str, str],
 ) -> dict[str, Any]:
-    doc_id = document_id(site, sid, data, douban_to_imdb)
+    doc_id = document_id(site, sid)
     titles = unique(
         string_values(data.get("name"))
         + string_values(data.get("name_cn"))
@@ -328,9 +324,9 @@ def normalize_work(
     if site == "douban":
         imdb_id = clean_text(data.get("imdb_id")) or douban_to_imdb.get(sid)
         if imdb_id:
-            source_ids["imdb"] = imdb_id
+            source_ids["imdb"] = normalize_imdb_id(imdb_id)
     if site == "imdb":
-        imdb_id = sid if sid.startswith("tt") else f"tt{sid}"
+        imdb_id = normalize_imdb_id(sid)
         source_ids["imdb"] = imdb_id
         douban_id = imdb_to_douban.get(imdb_id)
         if douban_id:
@@ -379,46 +375,6 @@ def normalize_work(
     }
 
 
-def merge_docs(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(left)
-    for field in (
-        "sources",
-        "titles",
-        "aliases",
-        "genres",
-        "tags",
-        "regions",
-        "languages",
-        "people",
-        "directors",
-        "writers",
-        "cast",
-        "staff",
-        "developers",
-        "publishers",
-    ):
-        merged[field] = unique(as_items(left.get(field)) + as_items(right.get(field)))
-
-    merged["source_ids"] = {**left.get("source_ids", {}), **right.get("source_ids", {})}
-    merged["source_paths"] = {**left.get("source_paths", {}), **right.get("source_paths", {})}
-
-    for field in ("kind", "year", "release_date", "poster", "rating_score", "rating_votes", "updated_at"):
-        if merged.get(field) in (None, "", []):
-            merged[field] = right.get(field)
-
-    left_desc = left.get("description") or ""
-    right_desc = right.get("description") or ""
-    if len(right_desc) > len(left_desc):
-        merged["description"] = right_desc[:TEXT_LIMIT]
-    else:
-        merged["description"] = left_desc[:TEXT_LIMIT] if left_desc else None
-
-    if right.get("updated_at") and (not left.get("updated_at") or right["updated_at"] > left["updated_at"]):
-        merged["updated_at"] = right["updated_at"]
-
-    return merged
-
-
 def iter_source_files(root: Path, settings: Settings) -> Iterable[tuple[str, Path, str]]:
     if settings.include_file_list:
         for rel in settings.include_file_list:
@@ -444,12 +400,47 @@ def iter_source_files(root: Path, settings: Settings) -> Iterable[tuple[str, Pat
 def upsert_staged(conn: sqlite3.Connection, doc: dict[str, Any]) -> None:
     row = conn.execute("select doc from works where id = ?", (doc["id"],)).fetchone()
     if row:
-        existing = json.loads(row[0])
-        doc = merge_docs(existing, doc)
+        doc = choose_duplicate_doc(json.loads(row[0]), doc)
     conn.execute(
         "insert or replace into works(id, doc) values(?, ?)",
         (doc["id"], json.dumps(doc, ensure_ascii=False, separators=(",", ":"))),
     )
+
+
+def doc_quality_key(doc: dict[str, Any]) -> tuple[Any, ...]:
+    list_fields = (
+        "titles",
+        "aliases",
+        "genres",
+        "tags",
+        "regions",
+        "languages",
+        "people",
+        "directors",
+        "writers",
+        "cast",
+        "staff",
+        "developers",
+        "publishers",
+    )
+    scalar_fields = ("year", "release_date", "poster", "rating_score", "rating_votes", "updated_at", "description")
+    list_count = sum(len(as_items(doc.get(field))) for field in list_fields)
+    scalar_count = sum(1 for field in scalar_fields if doc.get(field) not in (None, "", []))
+    description_len = len(doc.get("description") or "")
+    return (
+        doc.get("updated_at") or "",
+        int_value(doc.get("rating_votes")) or 0,
+        scalar_count,
+        list_count,
+        description_len,
+        json.dumps(doc.get("source_paths", {}), ensure_ascii=False, sort_keys=True),
+    )
+
+
+def choose_duplicate_doc(existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    if doc_quality_key(candidate) >= doc_quality_key(existing):
+        return candidate
+    return existing
 
 
 def prepare_source(settings: Settings) -> str | None:
@@ -603,6 +594,7 @@ def ingest_once(settings: Settings, force: bool = False) -> dict[str, Any]:
         "started_at": started_at,
         "finished_at": None,
         "source_commit": None,
+        "index_schema_version": INDEX_SCHEMA_VERSION,
         "documents": 0,
         "files_seen": 0,
         "errors": 0,
@@ -618,13 +610,15 @@ def ingest_once(settings: Settings, force: bool = False) -> dict[str, Any]:
             and source_commit
             and last_state.get("status") == "succeeded"
             and last_state.get("source_commit") == source_commit
+            and last_state.get("index_schema_version") == INDEX_SCHEMA_VERSION
         ):
             state.update(
                 {
                     "status": "skipped",
                     "source_commit": source_commit,
+                    "index_schema_version": INDEX_SCHEMA_VERSION,
                     "finished_at": now_iso(),
-                    "message": "source commit unchanged",
+                    "message": "source commit and index schema unchanged",
                 }
             )
             write_state(settings, state)
@@ -639,6 +633,7 @@ def ingest_once(settings: Settings, force: bool = False) -> dict[str, Any]:
                 "status": "succeeded",
                 "finished_at": now_iso(),
                 "source_commit": source_commit,
+                "index_schema_version": INDEX_SCHEMA_VERSION,
                 "documents": doc_count,
                 "files_seen": files_seen,
                 "errors": errors,

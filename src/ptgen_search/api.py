@@ -9,11 +9,12 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
+from .ids import source_document_id
 from .meili_client import MeiliClient, MeiliError
 
 settings = get_settings()
 client = MeiliClient(settings.meili_url, settings.meili_key)
-app = FastAPI(title="PtGen Search")
+app = FastAPI(title="PTGen search")
 
 ALLOWED_SOURCES = {"douban", "imdb", "bangumi", "steam", "epic", "indienova"}
 ALLOWED_KINDS = {"movie", "tv", "anime", "game", "work"}
@@ -50,6 +51,15 @@ def build_filter(source: str | None, kind: str | None, year: int | None) -> list
     if year is not None:
         filters.append(f"year = {year}")
     return filters
+
+
+def lookup_document_id(source: str, source_id: str) -> str:
+    if source not in ALLOWED_SOURCES:
+        raise HTTPException(status_code=400, detail="invalid source")
+    source_id = source_id.strip()
+    if not source_id:
+        raise HTTPException(status_code=400, detail="missing id")
+    return source_document_id(source, source_id)
 
 
 @app.get("/api/health")
@@ -105,6 +115,14 @@ def search(
                 "message": "index is still building",
             }
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/lookup")
+def lookup(source: str, id: Annotated[str, Query(min_length=1)]) -> dict:
+    try:
+        return client.document(settings.index_name, lookup_document_id(source, id))
+    except MeiliError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/works/{document_id:path}")
