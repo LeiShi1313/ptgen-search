@@ -25,6 +25,16 @@ app = FastAPI(title="PTGen search")
 
 ALLOWED_SOURCES = {"douban", "imdb", "bangumi", "steam", "epic", "indienova"}
 ALLOWED_KINDS = {"movie", "tv", "anime", "game"}
+SEARCH_FIELD_GROUPS = {
+    "titles": ["titles"],
+    "title": ["titles"],
+    "aliases": ["aliases"],
+    "alias": ["aliases"],
+    "title_aliases": ["titles", "aliases"],
+    "people": ["people", "directors", "writers", "cast", "staff", "developers", "publishers"],
+    "source_ids": ["source_ids"],
+    "metadata": ["genres", "tags", "description"],
+}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = PROJECT_ROOT / "web"
@@ -58,6 +68,24 @@ def build_filter(source: str | None, kind: str | None, year: int | None) -> list
     if year is not None:
         filters.append(f"year = {year}")
     return filters
+
+
+def build_search_fields(fields: str | None) -> list[str] | None:
+    if fields is None or not fields.strip():
+        return None
+
+    values: list[str] = []
+    for raw in fields.split(","):
+        token = raw.strip().lower()
+        if not token or token == "all":
+            continue
+        group = SEARCH_FIELD_GROUPS.get(token)
+        if group is None:
+            raise HTTPException(status_code=400, detail="invalid fields filter")
+        for field in group:
+            if field not in values:
+                values.append(field)
+    return values or None
 
 
 def lookup_document_id(source: str, source_id: str) -> str:
@@ -104,6 +132,7 @@ def search(
     source: str | None = None,
     kind: str | None = None,
     year: int | None = None,
+    fields: str | None = None,
 ) -> dict:
     payload = {
         "q": q,
@@ -116,6 +145,9 @@ def search(
     filters = build_filter(source, kind, year)
     if filters:
         payload["filter"] = filters
+    search_fields = build_search_fields(fields)
+    if search_fields:
+        payload["attributesToSearchOn"] = search_fields
     try:
         return proxy_search_posters(client.search(settings.index_name, payload))
     except MeiliError as exc:

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from ptgen_search import api as api_module
-from ptgen_search.api import build_filter, is_missing_index_error, lookup_document_id
+from ptgen_search.api import build_filter, build_search_fields, is_missing_index_error, lookup_document_id
 from ptgen_search.config import Settings
 from ptgen_search.ids import source_document_id
 from ptgen_search.ingest import build_staging, load_imdb_kind_map, normalize_work, upsert_staged
@@ -331,6 +331,20 @@ class NormalizeWorkTests(unittest.TestCase):
 
         self.assertEqual(build_filter("douban", "movie", 2011), ['sources = "douban"', 'kind = "movie"', "year = 2011"])
 
+    def test_search_fields_are_allow_listed(self) -> None:
+        self.assertIsNone(build_search_fields(None))
+        self.assertIsNone(build_search_fields("all"))
+        self.assertEqual(build_search_fields("titles,aliases"), ["titles", "aliases"])
+        self.assertEqual(build_search_fields("title_aliases"), ["titles", "aliases"])
+        self.assertEqual(
+            build_search_fields("people"),
+            ["people", "directors", "writers", "cast", "staff", "developers", "publishers"],
+        )
+        self.assertEqual(build_search_fields("source_ids,metadata"), ["source_ids", "genres", "tags", "description"])
+
+        with self.assertRaises(HTTPException):
+            build_search_fields('titles,description" OR kind = "movie')
+
     def test_source_document_id_uses_source_prefix(self) -> None:
         self.assertEqual(source_document_id("douban", "1291843"), "douban-1291843")
         self.assertEqual(source_document_id("imdb", "0133093"), "imdb-tt0133093")
@@ -360,6 +374,37 @@ class NormalizeWorkTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "imdb-tt0851578")
         self.assertEqual(fake.document_id, "imdb-tt0851578")
+
+    def test_search_route_scopes_fields(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.payload: dict = {}
+
+            def search(self, index_name: str, payload: dict) -> dict:
+                self.payload = payload
+                return {
+                    "hits": [],
+                    "estimatedTotalHits": 0,
+                    "limit": payload["limit"],
+                    "offset": payload["offset"],
+                    "processingTimeMs": 0,
+                    "query": payload["q"],
+                }
+
+        fake = FakeClient()
+        previous = api_module.client
+        api_module.client = fake
+        try:
+            response = TestClient(api_module.app).get(
+                "/api/search",
+                params={"q": "matrix", "fields": "title_aliases", "kind": "movie"},
+            )
+        finally:
+            api_module.client = previous
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake.payload["attributesToSearchOn"], ["titles", "aliases"])
+        self.assertEqual(fake.payload["filter"], ['kind = "movie"'])
 
     def test_document_fetch_encodes_document_id(self) -> None:
         paths = []

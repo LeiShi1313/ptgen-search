@@ -134,6 +134,16 @@ Query parameters:
 | `source` | no | One of `douban`, `imdb`, `bangumi`, `steam`, `epic`, `indienova`. |
 | `kind` | no | One of `movie`, `tv`, `anime`, `game`. |
 | `year` | no | Exact normalized release year. |
+| `fields` | no | Comma-separated search scope. Omit or use `all` for the default broad search. Supported scopes: `titles`, `aliases`, `title_aliases`, `people`, `source_ids`, `metadata`. |
+
+`fields` only changes which indexed attributes Meilisearch searches. The
+response shape is unchanged and results are still work documents. Examples:
+
+```bash
+curl 'http://127.0.0.1:8080/api/search?q=matrix&fields=title_aliases&kind=movie'
+curl 'http://127.0.0.1:8080/api/search?q=tt0133093&fields=source_ids'
+curl 'http://127.0.0.1:8080/api/search?q=keanu&fields=people'
+```
 
 For Douban records with a linked IMDb id, `kind` uses the linked IMDb `@type`
 when the matching IMDb row is available. This makes linked Douban movies and TV
