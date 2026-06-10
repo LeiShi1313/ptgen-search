@@ -24,7 +24,7 @@ poster_cache = PosterCache(
 app = FastAPI(title="PTGen search")
 
 ALLOWED_SOURCES = {"douban", "imdb", "bangumi", "steam", "epic", "indienova"}
-ALLOWED_KINDS = {"movie", "tv", "anime", "game", "work"}
+ALLOWED_KINDS = {"movie", "tv", "anime", "game"}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = PROJECT_ROOT / "web"

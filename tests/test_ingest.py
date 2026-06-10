@@ -11,8 +11,9 @@ from fastapi.testclient import TestClient
 
 from ptgen_search import api as api_module
 from ptgen_search.api import build_filter, is_missing_index_error, lookup_document_id
+from ptgen_search.config import Settings
 from ptgen_search.ids import source_document_id
-from ptgen_search.ingest import normalize_work, upsert_staged
+from ptgen_search.ingest import build_staging, load_imdb_kind_map, normalize_work, upsert_staged
 from ptgen_search.meili_client import MeiliError
 from ptgen_search.posters import PosterCache
 
@@ -43,7 +44,7 @@ class NormalizeWorkTests(unittest.TestCase):
         self.assertIn("齐德内克·吉拉斯基 Zdenek Jirasky", doc["directors"])
         self.assertIn("Actor One", doc["people"])
         self.assertEqual(doc["poster"], "https://example.test/poster.jpg")
-        self.assertEqual(doc["kind"], "work")
+        self.assertEqual(doc["kind"], "movie")
 
     def test_imdb_work_uses_source_id_and_map_link(self) -> None:
         data = {
@@ -66,7 +67,7 @@ class NormalizeWorkTests(unittest.TestCase):
         self.assertEqual(doc["id"], "imdb-tt0199626")
         self.assertEqual(doc["source_ids"]["douban"], "1309163")
         self.assertIn("Meg Ryan", doc["people"])
-        self.assertEqual(doc["kind"], "work")
+        self.assertEqual(doc["kind"], "movie")
 
     def test_imdb_movie_kind_is_normalized(self) -> None:
         doc = normalize_work(
@@ -79,6 +80,158 @@ class NormalizeWorkTests(unittest.TestCase):
         )
 
         self.assertEqual(doc["kind"], "movie")
+
+    def test_imdb_tv_kind_is_normalized(self) -> None:
+        series = normalize_work(
+            "imdb",
+            "tt2",
+            {"sid": "tt2", "site": "imdb", "name": "A Series", "@type": "TVSeries"},
+            "imdb/2.json",
+            {},
+            {},
+        )
+        episode = normalize_work(
+            "imdb",
+            "tt3",
+            {"sid": "tt3", "site": "imdb", "name": "An Episode", "@type": "TVEpisode"},
+            "imdb/3.json",
+            {},
+            {},
+        )
+
+        self.assertEqual(series["kind"], "tv")
+        self.assertEqual(episode["kind"], "tv")
+
+    def test_douban_kind_uses_linked_imdb_type_when_available(self) -> None:
+        movie = normalize_work(
+            "douban",
+            "10000794",
+            {"sid": "10000794", "site": "douban", "name": "A Film", "imdb_id": "tt1741246"},
+            "douban/10000794.json",
+            {},
+            {},
+            {"tt1741246": "movie"},
+        )
+        tv = normalize_work(
+            "douban",
+            "10000801",
+            {"sid": "10000801", "site": "douban", "name": "A Series"},
+            "douban/10000801.json",
+            {"10000801": "tt2091334"},
+            {},
+            {"tt2091334": "tv"},
+        )
+
+        self.assertEqual(movie["kind"], "movie")
+        self.assertEqual(tv["kind"], "tv")
+
+    def test_douban_kind_is_guessed_when_linked_imdb_type_is_missing(self) -> None:
+        movie = normalize_work(
+            "douban",
+            "10000794",
+            {"sid": "10000794", "site": "douban", "name": "Ambiguous", "imdb_id": "tt1741246"},
+            "douban/10000794.json",
+            {},
+            {},
+            {},
+        )
+        tv = normalize_work(
+            "douban",
+            "10001417",
+            {"sid": "10001417", "site": "douban", "name": "A Series", "episodes": "20"},
+            "douban/10001417.json",
+            {},
+            {},
+            {},
+        )
+
+        self.assertEqual(movie["kind"], "movie")
+        self.assertEqual(tv["kind"], "tv")
+
+    def test_douban_kind_guess_uses_season_titles(self) -> None:
+        doc = normalize_work(
+            "douban",
+            "10481125",
+            {"sid": "10481125", "site": "douban", "name": "The Ellen DeGeneres Show Season 9"},
+            "douban/10481125.json",
+            {},
+            {},
+            {},
+        )
+
+        self.assertEqual(doc["kind"], "tv")
+
+    def test_load_imdb_kind_map_reads_imdb_type(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            imdb_dir = Path(tmp) / "imdb"
+            imdb_dir.mkdir()
+            (imdb_dir / "tt1.json").write_text(
+                json.dumps({"sid": "tt1", "@type": "Movie"}),
+                encoding="utf-8",
+            )
+            (imdb_dir / "tt2.json").write_text(
+                json.dumps({"sid": "tt2", "@type": "TVSeries"}),
+                encoding="utf-8",
+            )
+            (imdb_dir / "tt3.json").write_text(
+                json.dumps({"sid": "tt3"}),
+                encoding="utf-8",
+            )
+
+            kinds = load_imdb_kind_map(Path(tmp))
+
+        self.assertEqual(kinds, {"tt0000001": "movie", "tt0000002": "tv"})
+
+    def test_build_staging_applies_imdb_kind_to_douban_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ptgen"
+            state_dir = Path(tmp) / "state"
+            (root / "douban").mkdir(parents=True)
+            (root / "imdb").mkdir()
+            (root / "internal_map").mkdir()
+            (root / "douban" / "1.json").write_text(
+                json.dumps({"sid": "1", "site": "douban", "chinese_title": "Mapped Movie"}),
+                encoding="utf-8",
+            )
+            (root / "douban" / "2.json").write_text(
+                json.dumps({"sid": "2", "site": "douban", "chinese_title": "Direct TV", "imdb_id": "tt2"}),
+                encoding="utf-8",
+            )
+            (root / "imdb" / "tt1.json").write_text(
+                json.dumps({"sid": "tt1", "site": "imdb", "name": "Mapped Movie", "@type": "Movie"}),
+                encoding="utf-8",
+            )
+            (root / "imdb" / "tt2.json").write_text(
+                json.dumps({"sid": "tt2", "site": "imdb", "name": "Direct TV", "@type": "TVSeries"}),
+                encoding="utf-8",
+            )
+            (root / "internal_map" / "douban_imdb_map.json").write_text(
+                json.dumps([{"dbid": "1", "imdbid": "tt1"}]),
+                encoding="utf-8",
+            )
+            settings = Settings(
+                ptgen_path=root,
+                state_dir=state_dir,
+                include_files="douban/1.json,douban/2.json",
+            )
+
+            staging_path, doc_count, files_seen, errors = build_staging(settings, "kindtest")
+            conn = sqlite3.connect(staging_path)
+            try:
+                rows = {
+                    row_id: json.loads(raw_doc)
+                    for row_id, raw_doc in conn.execute("select id, doc from works order by id")
+                }
+            finally:
+                conn.close()
+
+        self.assertEqual(doc_count, 2)
+        self.assertEqual(files_seen, 2)
+        self.assertEqual(errors, 0)
+        self.assertEqual(rows["douban-1"]["kind"], "movie")
+        self.assertEqual(rows["douban-1"]["source_ids"], {"douban": "1", "imdb": "tt0000001"})
+        self.assertEqual(rows["douban-2"]["kind"], "tv")
+        self.assertEqual(rows["douban-2"]["source_ids"], {"douban": "2", "imdb": "tt0000002"})
 
     def test_bangumi_cast_uses_actor_names_not_character_names(self) -> None:
         doc = normalize_work(
@@ -173,8 +326,10 @@ class NormalizeWorkTests(unittest.TestCase):
     def test_filter_rejects_injection(self) -> None:
         with self.assertRaises(HTTPException):
             build_filter('nosuch" OR sources = "douban', None, None)
+        with self.assertRaises(HTTPException):
+            build_filter(None, "work", None)
 
-        self.assertEqual(build_filter("douban", "work", 2011), ['sources = "douban"', 'kind = "work"', "year = 2011"])
+        self.assertEqual(build_filter("douban", "movie", 2011), ['sources = "douban"', 'kind = "movie"', "year = 2011"])
 
     def test_source_document_id_uses_source_prefix(self) -> None:
         self.assertEqual(source_document_id("douban", "1291843"), "douban-1291843")

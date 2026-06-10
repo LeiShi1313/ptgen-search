@@ -21,7 +21,7 @@ WORK_SOURCES = ("douban", "imdb", "bangumi", "steam", "epic", "indienova")
 INDEX_SCHEMA_VERSION = "source-specific-v2"
 GAME_SOURCES = {"steam", "epic", "indienova"}
 SOURCE_KINDS = {"Movie": "movie", "TVSeries": "tv", "TVEpisode": "tv", "VideoGame": "game"}
-ANIME_PLATFORMS = {"TV", "OVA", "OAD", "WEB", "剧场版", "Movie"}
+ANIME_PLATFORMS = {"TV", "OVA", "OAD", "WEB", "剧场版", "Movie", "电影", "日剧", "欧美剧", "华语剧", "电视剧", "动态漫画"}
 BANGUMI_STAFF_KEYS = {
     "导演",
     "監督",
@@ -171,7 +171,59 @@ def bangumi_staff_people(value: Any) -> list[str]:
     return names
 
 
-def normalized_kind(site: str, data: dict[str, Any]) -> str:
+def text_matches(values: Iterable[Any], needles: tuple[str, ...]) -> bool:
+    text = " ".join(string_values(list(values))).casefold()
+    return any(needle.casefold() in text for needle in needles)
+
+
+def guessed_douban_kind(data: dict[str, Any]) -> str:
+    title_values = (
+        string_values(data.get("name"))
+        + string_values(data.get("chinese_title"))
+        + string_values(data.get("foreign_title"))
+        + string_values(data.get("this_title"))
+        + string_values(data.get("trans_title"))
+        + string_values(data.get("aka"))
+    )
+    if text_matches(
+        title_values,
+        (
+            "season",
+            "tv series",
+            "tv-series",
+            "mini-series",
+            "miniseries",
+            "第1季",
+            "第一季",
+            "第二季",
+            "第三季",
+            "第四季",
+            "第五季",
+            "第六季",
+            "第七季",
+            "第八季",
+            "第九季",
+            "第十季",
+        ),
+    ):
+        return "tv"
+
+    episodes = int_value(data.get("episodes"))
+    if episodes and episodes > 1:
+        return "tv"
+    return "movie"
+
+
+def imdb_kind_from_type(data: dict[str, Any]) -> str | None:
+    raw_type = clean_text(data.get("@type"))
+    return SOURCE_KINDS.get(raw_type)
+
+
+def normalized_kind(site: str, data: dict[str, Any], linked_imdb_kind: str | None = None) -> str:
+    if site == "douban" and linked_imdb_kind:
+        return linked_imdb_kind
+    if site == "douban":
+        return guessed_douban_kind(data)
     if site in GAME_SOURCES:
         return "game"
     if site == "bangumi":
@@ -180,11 +232,11 @@ def normalized_kind(site: str, data: dict[str, Any]) -> str:
             return "game"
         if platform in ANIME_PLATFORMS:
             return "anime"
-        return "work"
-    raw_type = clean_text(data.get("@type"))
-    if raw_type in SOURCE_KINDS:
-        return SOURCE_KINDS[raw_type]
-    return "work"
+        return "anime"
+    imdb_kind = imdb_kind_from_type(data)
+    if imdb_kind:
+        return imdb_kind
+    return "movie"
 
 
 def unique(values: Iterable[Any], limit: int = LIST_LIMIT) -> list[Any]:
@@ -279,6 +331,24 @@ def load_title_maps(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     return douban_to_imdb, imdb_to_douban
 
 
+def load_imdb_kind_map(root: Path) -> dict[str, str]:
+    directory = root / "imdb"
+    if not directory.exists():
+        return {}
+    kinds: dict[str, str] = {}
+    for path in directory.glob("*.json"):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            imdb_id = normalize_imdb_id(clean_text(data.get("sid")) or path.stem)
+            kind = imdb_kind_from_type(data)
+            if kind:
+                kinds[imdb_id] = kind
+        except Exception as exc:  # noqa: BLE001 - bad source rows should not stop kind inference
+            print(f"failed to read IMDb kind {path}: {exc}", file=sys.stderr)
+    return kinds
+
+
 def document_id(site: str, sid: str) -> str:
     return source_document_id(site, sid)
 
@@ -290,6 +360,7 @@ def normalize_work(
     rel_path: str,
     douban_to_imdb: dict[str, str],
     imdb_to_douban: dict[str, str],
+    imdb_kind_by_id: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     doc_id = document_id(site, sid)
     titles = unique(
@@ -344,7 +415,12 @@ def normalize_work(
     )
 
     year = int_year(data.get("year")) or int_year(data.get("datePublished")) or int_year(data.get("date"))
-    kind = normalized_kind(site, data)
+    linked_imdb_kind = None
+    if site == "douban":
+        imdb_id = source_ids.get("imdb")
+        if imdb_id:
+            linked_imdb_kind = (imdb_kind_by_id or {}).get(imdb_id)
+    kind = normalized_kind(site, data, linked_imdb_kind)
 
     return {
         "id": doc_id,
@@ -490,6 +566,7 @@ def build_staging(settings: Settings, run_id: str) -> tuple[Path, int, int, int]
         staging_path.unlink()
 
     douban_to_imdb, imdb_to_douban = load_title_maps(settings.ptgen_path)
+    imdb_kind_by_id = load_imdb_kind_map(settings.ptgen_path)
     conn = sqlite3.connect(staging_path)
     conn.execute("pragma journal_mode=wal")
     conn.execute("pragma synchronous=normal")
@@ -503,7 +580,7 @@ def build_staging(settings: Settings, run_id: str) -> tuple[Path, int, int, int]
             with path.open("r", encoding="utf-8") as handle:
                 data = json.load(handle)
             sid = clean_text(data.get("sid")) or path.stem
-            doc = normalize_work(site, sid, data, rel_path, douban_to_imdb, imdb_to_douban)
+            doc = normalize_work(site, sid, data, rel_path, douban_to_imdb, imdb_to_douban, imdb_kind_by_id)
             if doc["titles"] or doc["aliases"]:
                 upsert_staged(conn, doc)
         except Exception as exc:  # noqa: BLE001 - bad source rows should not stop the run

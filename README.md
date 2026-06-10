@@ -132,8 +132,14 @@ Query parameters:
 | `limit` | no | Number of results, `1` to `100`. Default: `20`. |
 | `offset` | no | Result offset for pagination. Default: `0`. |
 | `source` | no | One of `douban`, `imdb`, `bangumi`, `steam`, `epic`, `indienova`. |
-| `kind` | no | One of `movie`, `tv`, `anime`, `game`, `work`. |
+| `kind` | no | One of `movie`, `tv`, `anime`, `game`. |
 | `year` | no | Exact normalized release year. |
+
+For Douban records with a linked IMDb id, `kind` uses the linked IMDb `@type`
+when the matching IMDb row is available. This makes linked Douban movies and TV
+works report `movie` or `tv`. When source-specific type data is unavailable,
+the ingester guesses the closest media kind instead of exposing a generic
+catch-all kind.
 
 Example:
 
@@ -148,7 +154,7 @@ Response shape:
   "hits": [
     {
       "id": "douban-10000794",
-      "kind": "work",
+      "kind": "movie",
       "sources": ["douban"],
       "source_ids": {
         "douban": "10000794",
