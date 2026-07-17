@@ -340,10 +340,13 @@ class NormalizeWorkTests(unittest.TestCase):
             build_search_fields("people"),
             ["people", "directors", "writers", "cast", "staff", "developers", "publishers"],
         )
-        self.assertEqual(build_search_fields("source_ids,metadata"), ["source_ids", "genres", "tags", "description"])
+        self.assertEqual(build_search_fields("metadata"), ["genres", "tags", "description"])
 
         with self.assertRaises(HTTPException):
             build_search_fields('titles,description" OR kind = "movie')
+
+    def test_source_id_search_uses_nested_meilisearch_fields(self) -> None:
+        self.assertEqual(build_search_fields("source_ids"), ["source_ids.*"])
 
     def test_source_document_id_uses_source_prefix(self) -> None:
         self.assertEqual(source_document_id("douban", "1291843"), "douban-1291843")
