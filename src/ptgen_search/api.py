@@ -32,7 +32,7 @@ SEARCH_FIELD_GROUPS = {
     "alias": ["aliases"],
     "title_aliases": ["titles", "aliases"],
     "people": ["people", "directors", "writers", "cast", "staff", "developers", "publishers"],
-    "source_ids": ["source_ids"],
+    "source_ids": ["source_ids.*"],
     "metadata": ["genres", "tags", "description"],
 }
 
